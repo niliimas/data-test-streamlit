@@ -3,6 +3,16 @@
 # 1) Data Overview & Validation
 # 2) KPI Dashboard
 # 3) Analysis & Insights
+#
+# Final version includes:
+# - Upload-based data source
+# - Cleaning toggles
+# - Filters (date range, vendor, category)
+# - Order definition toggle (Row-level vs Unique OrderKey)
+# - KPIs + Monthly trends + Top vendors/categories
+# - Task A (Customer behavior) + Task B (Vendor contribution)
+# - 4–6 Business insights
+# - Exports (filtered dataset + key tables)
 
 import streamlit as st
 import pandas as pd
@@ -122,18 +132,28 @@ def apply_filters(
     return out
 
 
-def compute_kpis(df: pd.DataFrame) -> dict:
+def compute_kpis(df: pd.DataFrame, use_unique_orderkey: bool) -> dict:
+    """
+    - Orders (rows): number of rows in dataset (as per "each row is an order")
+    - Orders (unique): distinct OrderKey count (useful when OrderKey duplicates exist)
+    - Orders used: depends on the selected order definition
+    """
+    orders_rows = int(len(df))
     orders_unique = df["OrderKey"].nunique() if "OrderKey" in df.columns else np.nan
+    orders_used = orders_unique if use_unique_orderkey else orders_rows
+
     customers_unique = df["CustomerKey"].nunique() if "CustomerKey" in df.columns else np.nan
     gmv_total = df["GMV"].sum() if "GMV" in df.columns else np.nan
     sold_coupon_total = df["SoldCoupon"].sum() if "SoldCoupon" in df.columns else np.nan
 
-    avg_gmv_per_order = (gmv_total / orders_unique) if (pd.notna(orders_unique) and orders_unique != 0) else np.nan
-    avg_orders_per_customer = (orders_unique / customers_unique) if (pd.notna(customers_unique) and customers_unique != 0) else np.nan
+    avg_gmv_per_order = (gmv_total / orders_used) if (pd.notna(orders_used) and orders_used != 0) else np.nan
+    avg_orders_per_customer = (orders_used / customers_unique) if (pd.notna(customers_unique) and customers_unique != 0) else np.nan
 
     return {
         "rows": int(len(df)),
+        "orders_rows": orders_rows,
         "orders_unique": orders_unique,
+        "orders_used": orders_used,
         "customers_unique": customers_unique,
         "gmv_total": gmv_total,
         "sold_coupon_total": sold_coupon_total,
@@ -142,7 +162,7 @@ def compute_kpis(df: pd.DataFrame) -> dict:
     }
 
 
-def month_trends(df: pd.DataFrame) -> pd.DataFrame:
+def month_trends(df: pd.DataFrame, use_unique_orderkey: bool) -> pd.DataFrame:
     if "OrderDate" not in df.columns:
         return pd.DataFrame()
 
@@ -151,10 +171,18 @@ def month_trends(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     tmp["YearMonth"] = tmp["OrderDate"].dt.to_period("M").astype(str)
+
+    # Orders aggregation depends on chosen definition
+    if use_unique_orderkey and "OrderKey" in tmp.columns:
+        orders_agg = ("OrderKey", "nunique")
+    else:
+        # row-level: each row is an order
+        orders_agg = ("OrderKey", "size")
+
     agg = tmp.groupby("YearMonth").agg(
-        Orders=("OrderKey", "nunique"),
+        Orders=orders_agg,
         GMV=("GMV", "sum"),
-        Rows=("OrderKey", "size"),
+        Rows=("OrderKey", "size")
     ).reset_index()
 
     agg["YearMonth_dt"] = pd.to_datetime(agg["YearMonth"] + "-01")
@@ -163,27 +191,38 @@ def month_trends(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def top_n(df: pd.DataFrame, group_col: str, value_col: str, n: int = 10) -> pd.DataFrame:
-    if group_col not in df.columns or value_col not in df.columns:
+    if group_col not in df.columns or value_col not in df.columns or df.empty:
         return pd.DataFrame()
     out = df.groupby(group_col, as_index=False)[value_col].sum()
     out = out.sort_values(value_col, ascending=False).head(n)
     return out
 
 
-def customer_behavior(df: pd.DataFrame) -> dict:
-    required = {"CustomerKey", "OrderKey", "GMV"}
+def customer_behavior(df: pd.DataFrame, use_unique_orderkey: bool) -> dict:
+    """
+    Task A:
+    - One-time vs repeat customers based on the chosen order definition
+    - Share of GMV from repeat customers
+    """
+    required = {"CustomerKey", "GMV"}
     if not required.issubset(set(df.columns)) or df.empty:
         return {}
 
-    cust_orders = df.groupby("CustomerKey")["OrderKey"].nunique()
-    total_customers = int(cust_orders.shape[0])
+    if use_unique_orderkey:
+        if "OrderKey" not in df.columns:
+            return {}
+        cust_orders = df.groupby("CustomerKey")["OrderKey"].nunique()
+    else:
+        # row-level orders
+        cust_orders = df.groupby("CustomerKey").size()
 
+    total_customers = int(cust_orders.shape[0])
     one_time = int((cust_orders == 1).sum())
     repeat = int((cust_orders > 1).sum())
 
     repeat_customers = cust_orders[cust_orders > 1].index
-    gmv_total = float(df["GMV"].sum())
-    gmv_repeat = float(df[df["CustomerKey"].isin(repeat_customers)]["GMV"].sum())
+    gmv_total = float(df["GMV"].sum()) if "GMV" in df.columns else 0.0
+    gmv_repeat = float(df[df["CustomerKey"].isin(repeat_customers)]["GMV"].sum()) if gmv_total else 0.0
 
     repeat_pct = (repeat / total_customers) if total_customers else np.nan
     repeat_gmv_share = (gmv_repeat / gmv_total) if gmv_total else np.nan
@@ -195,11 +234,17 @@ def customer_behavior(df: pd.DataFrame) -> dict:
         "repeat_pct": repeat_pct,
         "gmv_total": gmv_total,
         "gmv_repeat": gmv_repeat,
-        "repeat_gmv_share": repeat_gmv_share
+        "repeat_gmv_share": repeat_gmv_share,
+        "cust_orders_series": cust_orders
     }
 
 
 def vendor_contribution(df: pd.DataFrame) -> dict:
+    """
+    Task B:
+    - Top 5, Top 10 GMV share
+    - Top 20% vendors share
+    """
     required = {"VendorKey", "GMV"}
     if not required.issubset(set(df.columns)) or df.empty:
         return {}
@@ -246,6 +291,18 @@ def fmt_pct(x):
     return f"{x*100:.2f}%"
 
 
+def safe_csv_download(df: pd.DataFrame, filename: str, label: str):
+    if df is None or df.empty:
+        st.info(f"{label}: nothing to download (empty result).")
+        return
+    st.download_button(
+        label,
+        data=df.to_csv(index=False).encode("utf-8"),
+        file_name=filename,
+        mime="text/csv"
+    )
+
+
 # -----------------------------
 # Sidebar: Inputs
 # -----------------------------
@@ -278,8 +335,18 @@ df_base = clean_data(
     drop_gmv_le_zero=drop_gmv_le_zero
 )
 
-# Filters (based on cleaned/base dataset)
+# Sidebar: Order definition + Filters (based on cleaned/base dataset)
 with st.sidebar:
+    st.markdown("---")
+    st.subheader("🧾 Order Definition")
+
+    order_def = st.radio(
+        "How should we count orders?",
+        ["Row-level (each row is an order)", "Unique OrderKey (deduplicate by OrderKey)"],
+        index=0
+    )
+    use_unique_orderkey = (order_def == "Unique OrderKey (deduplicate by OrderKey)")
+
     st.markdown("---")
     st.subheader("🎛️ Filters")
 
@@ -306,7 +373,7 @@ with st.sidebar:
     vendors_sel = st.multiselect("Vendor", options=vendor_options, default=[])
     categories_sel = st.multiselect("CategoryID", options=category_options, default=[])
 
-    st.caption("All KPIs and charts are computed on the cleaned + filtered dataset.")
+    st.caption("All metrics and charts are computed on the cleaned + filtered dataset.")
 
 # Apply filters
 df = apply_filters(df_base, start_date, end_date, vendors_sel, categories_sel)
@@ -361,7 +428,8 @@ with tab1:
     if rep_raw["orderkey_duplicate_row_count"] and rep_raw["orderkey_duplicate_row_count"] > 0:
         issues.append(
             f"- `OrderKey` is not unique: about **{rep_raw['orderkey_duplicate_row_count']:,}** rows are additional "
-            f"(unique OrderKey = {rep_raw['orderkey_unique']:,} out of {rep_raw['rows']:,} rows)."
+            f"(unique OrderKey = {rep_raw['orderkey_unique']:,} out of {rep_raw['rows']:,} rows). "
+            "This suggests the dataset may not be strictly order-level, or it contains duplicated order records."
         )
     if rep_raw["duplicate_rows"] and rep_raw["duplicate_rows"] > 0:
         issues.append(f"- Fully duplicated rows exist: **{rep_raw['duplicate_rows']:,}** rows.")
@@ -371,7 +439,7 @@ with tab1:
             f"(could be refunds/cancellations or data issues)."
         )
     if rep_raw["bad_dates"] and rep_raw["bad_dates"] > 0:
-        issues.append(f"- Invalid/unparsed dates: **{rep_raw['bad_dates']:,}** rows.")
+        issues.append(f"- Invalid/unparsed dates: **{rep_raw['bad_dates']:,}** rows (OrderDateKey conversion failed).")
 
     if issues:
         st.markdown("\n".join(issues))
@@ -379,15 +447,18 @@ with tab1:
         st.success("No major issues detected.")
 
     st.markdown("---")
-    st.subheader("📥 Export")
-    st.download_button(
-        "Download current dataset (cleaned + filtered) as CSV",
-        data=df.to_csv(index=False).encode("utf-8"),
-        file_name="filtered_data.csv",
-        mime="text/csv"
-    )
+    st.subheader("📥 Exports")
 
-    with st.expander("Preview (first 50 rows)"):
+    colE1, colE2, colE3 = st.columns(3)
+    with colE1:
+        safe_csv_download(df, "filtered_data.csv", "Download filtered dataset (cleaned + filtered)")
+    with colE2:
+        safe_csv_download(schema_df, "schema_summary.csv", "Download schema summary")
+    with colE3:
+        issues_df = pd.DataFrame({"Issue": issues}) if issues else pd.DataFrame({"Issue": ["No major issues detected."]})
+        safe_csv_download(issues_df, "data_issues.csv", "Download issues list")
+
+    with st.expander("Preview (first 50 rows of filtered data)"):
         st.dataframe(df.head(50), use_container_width=True)
 
 
@@ -397,20 +468,32 @@ with tab1:
 with tab2:
     st.subheader("📌 KPI Dashboard")
 
-    k = compute_kpis(df)
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    k = compute_kpis(df, use_unique_orderkey)
 
-    c1.metric("Orders (unique OrderKey)", fmt_int(k["orders_unique"]))
-    c2.metric("Customers", fmt_int(k["customers_unique"]))
-    c3.metric("Total GMV", fmt_money(k["gmv_total"]))
-    c4.metric("SoldCoupon (sum)", fmt_money(k["sold_coupon_total"]) if pd.notna(k["sold_coupon_total"]) else "-")
-    c5.metric("Avg GMV / Order", fmt_money(k["avg_gmv_per_order"]))
-    c6.metric("Avg Orders / Customer", f"{k['avg_orders_per_customer']:.2f}" if pd.notna(k["avg_orders_per_customer"]) else "-")
+    # Show both order counts, plus the chosen one
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Orders (rows)", fmt_int(k["orders_rows"]))
+    c2.metric("Orders (unique OrderKey)", fmt_int(k["orders_unique"]))
+    c3.metric("Orders used (current definition)", fmt_int(k["orders_used"]))
+    c4.metric("Customers", fmt_int(k["customers_unique"]))
+    c5.metric("Total GMV", fmt_money(k["gmv_total"]))
+    c6.metric("Avg GMV / Order (used)", fmt_money(k["avg_gmv_per_order"]))
+
+    c7, c8, c9 = st.columns(3)
+    c7.metric("SoldCoupon (sum)", fmt_money(k["sold_coupon_total"]) if pd.notna(k["sold_coupon_total"]) else "-")
+    c8.metric("Avg Orders / Customer (used)", f"{k['avg_orders_per_customer']:.2f}" if pd.notna(k["avg_orders_per_customer"]) else "-")
+    c9.metric("Rows (filtered)", fmt_int(k["rows"]))
+
+    st.info(
+        f"Current order definition: **{order_def}**. "
+        "If the dataset is truly order-level, use row-level. If OrderKey duplicates reflect true duplicates or multi-line orders, "
+        "Unique OrderKey can be more appropriate."
+    )
 
     st.markdown("---")
     st.subheader("📈 Monthly Trends")
 
-    tr = month_trends(df)
+    tr = month_trends(df, use_unique_orderkey)
     if tr.empty:
         st.warning("Not enough valid date data for monthly trends.")
     else:
@@ -421,7 +504,7 @@ with tab2:
             .mark_line()
             .encode(
                 x=alt.X("YearMonth:N", sort=None, title="Year-Month"),
-                y=alt.Y("Orders:Q", title="Orders (unique)"),
+                y=alt.Y("Orders:Q", title="Orders"),
                 tooltip=["YearMonth", "Orders", alt.Tooltip("GMV:Q", format=",.2f")]
             )
             .properties(height=320)
@@ -443,7 +526,9 @@ with tab2:
         with colR:
             st.altair_chart(gmv_chart, use_container_width=True)
 
-        st.caption("Tip: if the last month is partial, it may show a visible drop compared to full months.")
+        st.caption("If the last month is partial, it may show a drop compared to full months.")
+
+        safe_csv_download(tr, "monthly_trends.csv", "Download monthly trends (CSV)")
 
     st.markdown("---")
     st.subheader("🏆 Breakdowns")
@@ -471,6 +556,8 @@ with tab2:
             )
             st.altair_chart(chart_v, use_container_width=True)
 
+            safe_csv_download(tv, "top10_vendors_by_gmv.csv", "Download Top 10 Vendors (CSV)")
+
     with right:
         st.markdown("### Top 10 Categories by GMV")
         tc = top_n(df, "CategoryID", "GMV", n=10)
@@ -491,6 +578,8 @@ with tab2:
             )
             st.altair_chart(chart_c, use_container_width=True)
 
+            safe_csv_download(tc, "top10_categories_by_gmv.csv", "Download Top 10 Categories (CSV)")
+
 
 # -----------------------------
 # Tab 3: Analysis & Insights
@@ -499,10 +588,10 @@ with tab3:
     st.subheader("🧠 Analysis & Insights")
 
     st.markdown("## Task A — Customer Behavior")
-    cb = customer_behavior(df)
+    cb = customer_behavior(df, use_unique_orderkey)
 
     if not cb:
-        st.warning("Not enough data (requires CustomerKey, OrderKey, GMV).")
+        st.warning("Not enough data for Task A (requires CustomerKey + GMV, and OrderKey if using Unique OrderKey).")
     else:
         a1, a2, a3, a4 = st.columns(4)
         a1.metric("Total customers", fmt_int(cb["total_customers"]))
@@ -511,18 +600,22 @@ with tab3:
         a4.metric("Repeat %", fmt_pct(cb["repeat_pct"]))
 
         st.write(
-            f"Repeat customers represent **{fmt_pct(cb['repeat_pct'])}** of customers but generate "
-            f"**{fmt_pct(cb['repeat_gmv_share'])}** of GMV."
+            f"Using **{order_def}**, repeat customers represent **{fmt_pct(cb['repeat_pct'])}** of customers "
+            f"but generate **{fmt_pct(cb['repeat_gmv_share'])}** of GMV."
         )
 
-        cust_orders = df.groupby("CustomerKey")["OrderKey"].nunique().reset_index(name="OrdersPerCustomer")
-        cust_orders["Bin"] = pd.cut(
-            cust_orders["OrdersPerCustomer"],
+        # Distribution chart: orders per customer (binned)
+        cust_orders_series = cb["cust_orders_series"]
+        cust_orders_df = cust_orders_series.reset_index()
+        cust_orders_df.columns = ["CustomerKey", "OrdersPerCustomer"]
+
+        cust_orders_df["Bin"] = pd.cut(
+            cust_orders_df["OrdersPerCustomer"],
             bins=[0, 1, 2, 3, 5, 10, 999999],
             labels=["1", "2", "3", "4-5", "6-10", "11+"],
             include_lowest=True
         )
-        dist = cust_orders.groupby("Bin", as_index=False).size().rename(columns={"size": "Customers"})
+        dist = cust_orders_df.groupby("Bin", as_index=False).size().rename(columns={"size": "Customers"})
 
         dist_chart = (
             alt.Chart(dist)
@@ -536,12 +629,14 @@ with tab3:
         )
         st.altair_chart(dist_chart, use_container_width=True)
 
+        safe_csv_download(dist, "orders_per_customer_distribution.csv", "Download orders/customer distribution (CSV)")
+
     st.markdown("---")
     st.markdown("## Task B — Vendor Contribution")
     vc = vendor_contribution(df)
 
     if not vc:
-        st.warning("Not enough data (requires VendorKey, GMV).")
+        st.warning("Not enough data for Task B (requires VendorKey and GMV).")
     else:
         b1, b2, b3, b4 = st.columns(4)
         b1.metric("Vendors", fmt_int(vc["vendor_count"]))
@@ -568,6 +663,8 @@ with tab3:
         st.altair_chart(pareto, use_container_width=True)
         st.caption("The curve shows how concentrated GMV is among top vendors (Pareto effect).")
 
+        safe_csv_download(vtable, "vendor_contribution_table.csv", "Download vendor contribution table (CSV)")
+
     st.markdown("---")
     st.markdown("## 📌 Business Insights (4–6)")
 
@@ -577,31 +674,29 @@ with tab3:
     if rep_raw["orderkey_duplicate_row_count"] and rep_raw["orderkey_duplicate_row_count"] > 0:
         insights.append(
             f"1) `OrderKey` is not unique (about {rep_raw['orderkey_duplicate_row_count']:,} extra rows vs unique orders). "
-            "Define the order grain clearly (order-level vs line-level) and align KPI logic accordingly."
+            "This may indicate duplicated order records or a non-order-level grain. Metric definitions should be aligned with the intended grain."
         )
     if rep_raw["gmv_le_zero"] and rep_raw["gmv_le_zero"] > 0:
         insights.append(
             f"2) There are {rep_raw['gmv_le_zero']:,} rows with `GMV ≤ 0`. "
-            "These likely represent cancellations/refunds and should be handled explicitly."
+            "These likely represent cancellations/refunds and should be handled explicitly in reporting."
         )
     if cb:
         insights.append(
-            f"3) A large share of customers are one-time buyers. Repeat rate is {fmt_pct(cb['repeat_pct'])}, "
-            f"yet repeat customers generate {fmt_pct(cb['repeat_gmv_share'])} of GMV — strong case for retention/CRM."
+            f"3) Customer base is skewed toward one-time buyers under **{order_def}**. "
+            f"Repeat customers are {fmt_pct(cb['repeat_pct'])} of customers but generate {fmt_pct(cb['repeat_gmv_share'])} of GMV — strong case for retention/CRM."
         )
     if vc:
         insights.append(
-            f"4) GMV is concentrated: Top 10 vendors generate about {fmt_pct(vc['top10_share'])} of GMV — "
-            "consider vendor retention plans and diversification."
+            f"4) GMV is concentrated: Top 10 vendors generate about {fmt_pct(vc['top10_share'])} of GMV — consider vendor retention plans and diversification."
         )
         insights.append(
-            f"5) Top 20% vendors generate about {fmt_pct(vc['top20pct_share'])} of GMV — "
-            "long tail vendors contribute little; review operational cost vs value."
+            f"5) Top 20% vendors generate about {fmt_pct(vc['top20pct_share'])} of GMV — long tail contributes little; evaluate operational cost vs value of tail vendors."
         )
 
     insights.append(
-        "6) Recommended next step: build a small analytics-ready data mart (FactOrders + DimDate/DimCustomer/DimVendor/DimCategory) "
-        "to improve Power BI performance and metric consistency."
+        "6) Recommended next step: build an analytics-ready data mart (FactOrders + DimDate/DimCustomer/DimVendor/DimCategory) "
+        "to improve BI performance and ensure consistent KPI definitions across teams."
     )
 
     for it in insights[:6]:
@@ -612,6 +707,9 @@ with tab3:
     st.markdown(
         """
 - This app computes every metric on the **cleaned + filtered** dataset.
+- The app also supports two order-counting approaches:
+  - Row-level (matches the common assumption "each row is an order")
+  - Unique OrderKey (useful when OrderKey duplicates exist)
 - Recommended deliverables:
   - `app.py`
   - `requirements.txt`
