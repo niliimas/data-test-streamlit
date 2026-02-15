@@ -12,6 +12,7 @@ The application includes:
 - Business Insights
 
 The dashboard supports interactive filtering and two different order definitions:
+
 - Row-level (each row is considered one order)
 - Unique OrderKey (orders counted using distinct OrderKey values)
 
@@ -53,11 +54,11 @@ All detected issues are displayed in the **Data Overview** section.
 
 Orders can be calculated using two approaches:
 
-1. **Row-level definition**  
-   Each row is treated as one order.
+### 1. Row-level definition
+Each row is treated as one order.
 
-2. **Unique OrderKey definition**  
-   Orders are counted using distinct OrderKey values.
+### 2. Unique OrderKey definition
+Orders are counted using distinct OrderKey values.
 
 Main KPIs:
 
@@ -138,3 +139,32 @@ The application includes 4–6 analytical insights covering:
 
 ```bash
 pip install -r requirements.txt
+
+```
+
+### 2. Run the application
+
+```bash
+streamlit run app.py
+```
+
+### 3. Upload the dataset
+
+After the app starts, upload the provided Excel file (`Data.xlsx`) using the file uploader inside the application.
+
+---
+
+## Project Structure
+
+```
+app.py
+requirements.txt
+README.md
+```
+---
+
+## Notes
+
+- All metrics are calculated on the cleaned and filtered dataset.
+- Cleaning options include removing duplicate rows and excluding GMV ≤ 0 records.
+- Order calculation logic is configurable to ensure analytical transparency.
