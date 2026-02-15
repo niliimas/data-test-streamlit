@@ -1,16 +1,140 @@
 # Data Analysis Test — Streamlit KPI Dashboard
 
-This project includes:
+## Overview
+This project is a Streamlit-based interactive dashboard built for a data analysis take-home test.
 
-1. Data Overview & Validation
-2. KPI Dashboard
-3. Customer & Vendor Analysis
-4. Business Insights
+The application includes:
+
+- Data Overview & Validation
+- KPI Dashboard
+- Customer Behavior Analysis
+- Vendor Contribution Analysis
+- Business Insights
+
+The dashboard supports interactive filtering and two different order definitions:
+- Row-level (each row is considered one order)
+- Unique OrderKey (orders counted using distinct OrderKey values)
 
 ---
 
-## How to run locally
+## Dataset Description
+
+The dataset contains transactional data with the following fields:
+
+- OrderKey
+- CustomerKey
+- VendorKey
+- SoldCoupon
+- GMV
+- CategoryID
+- OrderDateKey
+
+`OrderDateKey` is converted into a proper datetime field (`OrderDate`) for time-based analysis.
+
+---
+
+## Data Validation & Quality Checks
+
+The application performs the following validation steps:
+
+- Total row and column count
+- Data type inspection
+- Missing value detection
+- Duplicate row detection
+- OrderKey uniqueness validation
+- GMV ≤ 0 detection
+- Date conversion validation
+
+All detected issues are displayed in the **Data Overview** section.
+
+---
+
+## KPI Definitions
+
+Orders can be calculated using two approaches:
+
+1. **Row-level definition**  
+   Each row is treated as one order.
+
+2. **Unique OrderKey definition**  
+   Orders are counted using distinct OrderKey values.
+
+Main KPIs:
+
+- Total Orders
+- Total Customers (distinct CustomerKey)
+- Total GMV (sum of GMV)
+- Average GMV per Order
+- Average Orders per Customer
+
+All KPIs dynamically respond to:
+
+- Selected filters
+- Selected order definition
+- Applied data cleaning options
+
+---
+
+## Dashboard Features
+
+### Interactive Filters
+
+- Date range
+- Vendor
+- Category
+- Order definition toggle
+
+All visualizations and KPIs update dynamically based on filter selection.
+
+### Trend Analysis
+
+- Monthly Orders
+- Monthly GMV
+
+### Breakdown Analysis
+
+- Top 10 Vendors by GMV
+- Top 10 Categories by GMV
+
+---
+
+## Analysis Section
+
+### Task A — Customer Behavior
+
+- Orders per customer
+- One-time vs repeat customers
+- Repeat customer percentage
+- GMV share from repeat customers
+- Orders per customer distribution (binned)
+
+### Task B — Vendor Contribution
+
+- GMV per vendor
+- Vendor ranking by GMV
+- Top 5 GMV share
+- Top 10 GMV share
+- Top 20% vendor GMV share
+- Cumulative GMV curve (Pareto analysis)
+
+---
+
+## Business Insights
+
+The application includes 4–6 analytical insights covering:
+
+- Impact of OrderKey duplication
+- Presence of GMV ≤ 0 records
+- Customer retention opportunities
+- Vendor revenue concentration risk
+- Long-tail vendor contribution
+- Recommendation for building an analytics-ready data mart
+
+---
+
+## How to Run Locally
+
+### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
-streamlit run app.py
