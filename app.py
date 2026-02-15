@@ -27,8 +27,13 @@ st.caption("Data Overview & Validation • KPI Dashboard • Analysis & Insights
 # Utilities
 # -----------------------------
 @st.cache_data(show_spinner=False)
-def load_data(path: str) -> pd.DataFrame:
-    df = pd.read_excel(path)
+def load_data(source) -> pd.DataFrame:
+    """
+    Reads Excel data from either:
+    - an uploaded file (Streamlit UploadedFile), or
+    - a file path (string).
+    """
+    df = pd.read_excel(source)
 
     # Normalize IDs
     for col in ["OrderKey", "CustomerKey", "VendorKey"]:
@@ -247,18 +252,23 @@ def fmt_pct(x):
 with st.sidebar:
     st.header("⚙️ Settings")
 
-    data_path = st.text_input("Dataset path", value="Data.xlsx")
+    st.subheader("📁 Data Source")
+    uploaded_file = st.file_uploader("Upload Data.xlsx", type=["xlsx"])
 
     st.markdown("---")
     st.subheader("🧹 Data Cleaning")
     drop_full_duplicates = st.checkbox("Drop fully duplicated rows", value=True)
     drop_gmv_le_zero = st.checkbox("Drop rows with GMV ≤ 0", value=True)
 
-# Load
+# Load (from uploader)
+if uploaded_file is None:
+    st.warning("Please upload the Excel file (Data.xlsx) to proceed.")
+    st.stop()
+
 try:
-    df_raw = load_data(data_path)
+    df_raw = load_data(uploaded_file)
 except Exception as e:
-    st.error(f"Failed to read dataset: {e}")
+    st.error(f"Failed to read uploaded dataset: {e}")
     st.stop()
 
 # Cleaned base dataset
