@@ -124,14 +124,46 @@ All visualizations and KPIs update dynamically based on filter selection.
 
 ## Business Insights
 
-The application includes 4–6 analytical insights covering:
+The application includes a structured **insight layer** that goes beyond descriptive metrics and connects findings to business implications.
 
-- Impact of OrderKey duplication
-- Presence of GMV ≤ 0 records
-- Customer retention opportunities
-- Vendor revenue concentration risk
-- Long-tail vendor contribution
-- Recommendation for building an analytics-ready data mart
+Key analytical insights include:
+
+- **Data Grain Ambiguity**  
+  `OrderKey` is not fully unique, which may indicate non–order-level granularity or duplicated records. KPI definitions (e.g., Orders, AOV) can materially change depending on whether orders are counted at row-level or by unique `OrderKey`.
+
+- **Refund / Cancellation Handling**  
+  The presence of `GMV ≤ 0` rows suggests potential refunds, cancellations, or chargebacks. These should be explicitly flagged and separated (e.g., Gross GMV vs Net GMV) to avoid distorting revenue reporting.
+
+- **Customer Retention Opportunity**  
+  A relatively small share of repeat customers generates a disproportionately high share of GMV. This indicates strong retention leverage and highlights the financial importance of CRM and lifecycle initiatives.
+
+- **Quantified Retention Impact (Directional Scenario)**  
+  Under a simplifying assumption, even a small improvement in repeat rate (e.g., converting 5% of one-time customers) can generate a meaningful GMV uplift.  
+  These are directional impact estimates meant to quantify upside, not precise forecasts.
+
+- **Vendor Revenue Concentration Risk**  
+  A small group of top vendors contributes a significant share of total GMV. This creates both strategic partnership opportunities and dependency risk in case of vendor churn.
+
+- **Long-Tail Vendor Contribution (Pareto Structure)**  
+  The vendor portfolio exhibits a Pareto-like structure where a minority of vendors drives most revenue. This raises operational questions around resource allocation and vendor segmentation strategy.
+
+- **Category-Level Concentration (Product Mix Risk)**  
+  A small number of top categories accounts for a substantial share of GMV, indicating product concentration. Diversifying the category mix may reduce structural revenue risk.
+
+- **Campaign/Event-Driven Growth Pattern**  
+  Monthly trends reveal peak periods with noticeable spikes in Orders and GMV, suggesting campaign-driven uplift rather than purely organic growth.  
+  Campaign attribution analysis is recommended to validate incrementality.
+
+- **Structural Recommendation (Analytics Data Mart)**  
+  Build an analytics-ready data mart consisting of:
+  - `FactOrders`
+  - `DimDate`
+  - `DimCustomer`
+  - `DimVendor`
+  - `DimCategory`
+
+  This will standardize KPI definitions, resolve grain ambiguity, and improve BI scalability and performance.
+
 
 ---
 
