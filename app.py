@@ -11,7 +11,7 @@
 # - Order definition toggle (Row-level vs Unique OrderKey)
 # - KPIs + Monthly trends + Top vendors/categories
 # - Task A (Customer behavior) + Task B (Vendor contribution)
-# - 4–6 Business insights
+# - Business insights (expanded)
 # - Impact scenarios (Retention upside + Vendor dependency risk)
 # - Exports (filtered dataset + key tables)
 
@@ -30,7 +30,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title(" Data Analysis Test — Streamlit App")
+st.title("📊 Data Analysis Test — Streamlit App")
 st.caption("Data Overview & Validation • KPI Dashboard • Analysis & Insights")
 
 
@@ -112,13 +112,7 @@ def clean_data(df: pd.DataFrame, drop_full_duplicates: bool, drop_gmv_le_zero: b
     return out
 
 
-def apply_filters(
-    df: pd.DataFrame,
-    start_date,
-    end_date,
-    vendors: list,
-    categories: list
-) -> pd.DataFrame:
+def apply_filters(df: pd.DataFrame, start_date, end_date, vendors: list, categories: list) -> pd.DataFrame:
     out = df.copy()
 
     if "OrderDate" in out.columns and start_date and end_date:
@@ -177,7 +171,6 @@ def month_trends(df: pd.DataFrame, use_unique_orderkey: bool) -> pd.DataFrame:
     if use_unique_orderkey and "OrderKey" in tmp.columns:
         orders_agg = ("OrderKey", "nunique")
     else:
-        # row-level: each row is an order
         orders_agg = ("OrderKey", "size")
 
     agg = tmp.groupby("YearMonth").agg(
@@ -214,7 +207,6 @@ def customer_behavior(df: pd.DataFrame, use_unique_orderkey: bool) -> dict:
             return {}
         cust_orders = df.groupby("CustomerKey")["OrderKey"].nunique()
     else:
-        # row-level orders
         cust_orders = df.groupby("CustomerKey").size()
 
     total_customers = int(cust_orders.shape[0])
@@ -653,9 +645,15 @@ with tab2:
 with tab3:
     st.subheader(" Analysis & Insights")
 
+    # Precompute common helpers for insights
+    rep_raw = data_quality_report(df_raw)
+    tr_all = month_trends(df, use_unique_orderkey)  # based on filtered df
+    tc_all = top_n(df, "CategoryID", "GMV", n=10)
+
     st.markdown("## Task A — Customer Behavior")
     cb = customer_behavior(df, use_unique_orderkey)
 
+    ret_df = pd.DataFrame()
     if not cb:
         st.warning("Not enough data for Task A (requires CustomerKey + GMV, and OrderKey if using Unique OrderKey).")
     else:
@@ -696,18 +694,15 @@ with tab3:
         st.altair_chart(dist_chart, use_container_width=True)
         safe_csv_download(dist, "orders_per_customer_distribution.csv", "Download orders/customer distribution (CSV)")
 
-        # -----------------------------
         # Impact Scenario: Retention Upside
-        # -----------------------------
         st.markdown("---")
-        st.markdown("###  Retention Upside (Impact Scenarios)")
+        st.markdown("### 📈 Retention Upside (Impact Scenarios)")
         st.caption("Directional estimates under a simplifying assumption (not a precise forecast).")
 
         ret_df = retention_uplift_scenarios(cb, conversion_rates=(0.02, 0.05, 0.10))
         if ret_df.empty:
             st.info("Not enough data to estimate retention uplift scenarios.")
         else:
-            # display-friendly copy
             ret_disp = ret_df.copy()
             ret_disp["Avg GMV per repeat customer (assumption)"] = ret_disp["Avg GMV per repeat customer (assumption)"].map(lambda x: f"{x:,.2f}")
             ret_disp["Estimated GMV uplift"] = ret_disp["Estimated GMV uplift"].map(lambda x: f"{x:,.2f}")
@@ -718,6 +713,7 @@ with tab3:
     st.markdown("## Task B — Vendor Contribution")
     vc = vendor_contribution(df)
 
+    risk_df = pd.DataFrame()
     if not vc:
         st.warning("Not enough data for Task B (requires VendorKey and GMV).")
     else:
@@ -748,9 +744,7 @@ with tab3:
 
         safe_csv_download(vtable, "vendor_contribution_table.csv", "Download vendor contribution table (CSV)")
 
-        # -----------------------------
         # Impact Scenario: Vendor Dependency Risk
-        # -----------------------------
         st.markdown("---")
         st.markdown("###  Vendor Dependency Risk (Impact Scenarios)")
         st.caption("Directional estimates under a simplifying assumption (not a precise forecast).")
@@ -765,41 +759,99 @@ with tab3:
             st.dataframe(risk_disp, use_container_width=True)
             safe_csv_download(risk_df, "vendor_dependency_risk_scenarios.csv", "Download vendor dependency scenarios (CSV)")
 
+    # -----------------------------
+    # Business Insights 
+    # -----------------------------
     st.markdown("---")
-    st.markdown("##  Business Insights (4–6)")
-
-    rep_raw = data_quality_report(df_raw)
+    st.markdown("##  Business Insights")
 
     insights = []
-    if rep_raw["orderkey_duplicate_row_count"] and rep_raw["orderkey_duplicate_row_count"] > 0:
+
+    # 1) Grain ambiguity
+    if rep_raw.get("orderkey_duplicate_row_count") and rep_raw["orderkey_duplicate_row_count"] > 0:
         insights.append(
-            f"1) `OrderKey` is not unique (about {rep_raw['orderkey_duplicate_row_count']:,} extra rows vs unique orders). "
-            "This may indicate duplicated order records or a non-order-level grain. Metric definitions should be aligned with the intended grain."
-        )
-    if rep_raw["gmv_le_zero"] and rep_raw["gmv_le_zero"] > 0:
-        insights.append(
-            f"2) There are {rep_raw['gmv_le_zero']:,} rows with `GMV ≤ 0`. "
-            "These likely represent cancellations/refunds and should be handled explicitly in reporting."
-        )
-    if cb:
-        insights.append(
-            f"3) Customer base is skewed toward one-time buyers under **{order_def}**. "
-            f"Repeat customers are {fmt_pct(cb['repeat_pct'])} of customers but generate {fmt_pct(cb['repeat_gmv_share'])} of GMV — strong case for retention/CRM."
-        )
-    if vc:
-        insights.append(
-            f"4) GMV is concentrated: Top 10 vendors generate about {fmt_pct(vc['top10_share'])} of GMV — consider vendor retention plans and diversification."
-        )
-        insights.append(
-            f"5) Top 20% vendors generate about {fmt_pct(vc['top20pct_share'])} of GMV — long tail contributes little; evaluate operational cost vs value of tail vendors."
+            f"1) **Data Grain Ambiguity** — `OrderKey` is not unique: about **{rep_raw['orderkey_duplicate_row_count']:,}** extra rows vs unique orders. "
+            "This suggests the dataset may not be strictly order-level (or contains duplicated order records). "
+            "Therefore, KPI definitions should be aligned with the intended grain (order-definition toggle improves transparency)."
         )
 
+    # 2) Refund/cancel
+    if rep_raw.get("gmv_le_zero") and rep_raw["gmv_le_zero"] > 0:
+        insights.append(
+            f"2) **Refund / Cancellation Handling** — There are **{rep_raw['gmv_le_zero']:,}** rows with `GMV ≤ 0`. "
+            "These likely represent refunds/cancellations or data issues and should be handled explicitly (e.g., separate reporting flag)."
+        )
+
+    # 3) Retention opportunity
+    if cb:
+        insights.append(
+            f"3) **Customer Retention Opportunity** — Under **{order_def}**, repeat customers are **{fmt_pct(cb['repeat_pct'])}** of customers "
+            f"but generate **{fmt_pct(cb['repeat_gmv_share'])}** of GMV. "
+            "This indicates strong retention upside (repeat customers have higher economic value)."
+        )
+
+    # 4) Quantified retention impact (use 5% row if exists)
+    if isinstance(ret_df, pd.DataFrame) and not ret_df.empty:
+        row5 = ret_df[ret_df["Scenario"].str.contains("5%")]
+        if not row5.empty:
+            uplift_5 = float(row5.iloc[0]["Estimated GMV uplift"])
+            insights.append(
+                f"4) **Quantified Retention Impact** — Under a simplifying assumption, converting **5%** of one-time customers to repeat "
+                f"could increase GMV by approximately **{uplift_5:,.0f}**. "
+                "This quantifies the financial leverage of retention initiatives."
+            )
+        else:
+            # fallback: show the middle scenario if 5% label not found
+            mid = ret_df.iloc[min(1, len(ret_df)-1)]
+            insights.append(
+                f"4) **Quantified Retention Impact** — Directional estimate: scenario '{mid['Scenario']}' implies "
+                f"~**{float(mid['Estimated GMV uplift']):,.0f}** GMV uplift under simplifying assumptions."
+            )
+
+    # 5) Vendor concentration
+    if vc:
+        insights.append(
+            f"5) **Revenue Concentration Risk (Vendor-Level)** — Top 10 vendors generate about **{fmt_pct(vc['top10_share'])}** of total GMV. "
+            "This suggests dependency risk (loss of a top vendor can materially impact revenue) and opportunity for strategic partnerships."
+        )
+
+    # 6) Category dominance (top 2 share)
+    if isinstance(tc_all, pd.DataFrame) and not tc_all.empty and "GMV" in tc_all.columns:
+        total_gmv = float(df["GMV"].sum()) if "GMV" in df.columns else 0.0
+        if total_gmv > 0 and len(tc_all) >= 2:
+            top2_share = float(tc_all.head(2)["GMV"].sum() / total_gmv)
+            top1_cat = str(tc_all.iloc[0]["CategoryID"])
+            top2_cat = str(tc_all.iloc[1]["CategoryID"])
+            insights.append(
+                f"6) **Category Dominance** — Top 2 categories (e.g., **{top1_cat}** and **{top2_cat}**) account for about **{top2_share*100:.2f}%** of GMV. "
+                "This indicates product/category concentration and suggests diversification opportunities."
+            )
+
+    # 7) Campaign-driven spike (detect peak month by GMV)
+    if isinstance(tr_all, pd.DataFrame) and not tr_all.empty and "GMV" in tr_all.columns and "YearMonth" in tr_all.columns:
+        peak_row = tr_all.loc[tr_all["GMV"].idxmax()]
+        peak_month = str(peak_row["YearMonth"])
+        insights.append(
+            f"7) **Campaign-Driven Growth Pattern** — A notable spike appears around **{peak_month}** (highest monthly GMV). "
+            "This suggests campaign/event-driven growth rather than purely organic trend; campaign attribution analysis is recommended."
+        )
+
+    # 8) Dual-side concentration
+    if cb and vc:
+        insights.append(
+            "8) **Dual-Side Concentration Risk** — Revenue is concentrated on both sides of the marketplace: "
+            "a small share of repeat customers drives ~half of GMV, and a small share of vendors drives ~half of GMV. "
+            "This structural concentration increases systemic dependency risk."
+        )
+
+    # 9) Structural recommendation
     insights.append(
-        "6) Recommended next step: build an analytics-ready data mart (FactOrders + DimDate/DimCustomer/DimVendor/DimCategory) "
+        "9) **Structural Recommendation** — Build an analytics-ready data mart "
+        "(FactOrders + DimDate/DimCustomer/DimVendor/DimCategory) "
         "to improve BI performance and ensure consistent KPI definitions across teams."
     )
 
-    for it in insights[:6]:
+    for it in insights:
         st.write(it)
 
     st.markdown("---")
@@ -810,10 +862,11 @@ with tab3:
 - The app also supports two order-counting approaches:
   - Row-level (matches the common assumption "each row is an order")
   - Unique OrderKey (useful when OrderKey duplicates exist)
+- Impact scenarios are **directional** and **assumption-driven** (not a precise forecast).
 - Recommended deliverables:
   - `app.py`
   - `requirements.txt`
-  - `README.md` (how to run, KPI definitions, data issues found)
+  - `README.md` (how to run, KPI definitions, data issues found, assumptions/limitations)
 """
     )
 
