@@ -12,6 +12,7 @@
 # - KPIs + Monthly trends + Top vendors/categories
 # - Task A (Customer behavior) + Task B (Vendor contribution)
 # - 4–6 Business insights
+# - Impact scenarios (Retention upside + Vendor dependency risk)
 # - Exports (filtered dataset + key tables)
 
 import streamlit as st
@@ -29,7 +30,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📊 Data Analysis Test — Streamlit App")
+st.title(" Data Analysis Test — Streamlit App")
 st.caption("Data Overview & Validation • KPI Dashboard • Analysis & Insights")
 
 
@@ -273,6 +274,74 @@ def vendor_contribution(df: pd.DataFrame) -> dict:
     }
 
 
+# -----------------------------
+# Impact Scenarios (Assumption-driven)
+# -----------------------------
+def retention_uplift_scenarios(cb: dict, conversion_rates=(0.02, 0.05, 0.10)) -> pd.DataFrame:
+    """
+    Estimate GMV uplift if a fraction of one-time customers become repeat customers.
+
+    Assumption:
+    Converted customers generate the same average GMV as current repeat customers.
+    This is a directional estimate, not a precise forecast.
+    """
+    if not cb:
+        return pd.DataFrame()
+
+    one_time = cb.get("one_time_customers", 0)
+    repeat = cb.get("repeat_customers", 0)
+    gmv_repeat = cb.get("gmv_repeat", 0.0)
+
+    if repeat <= 0 or one_time <= 0 or gmv_repeat <= 0:
+        return pd.DataFrame()
+
+    avg_gmv_per_repeat_customer = gmv_repeat / repeat
+
+    rows = []
+    for r in conversion_rates:
+        converted = int(round(one_time * r))
+        uplift_gmv = converted * avg_gmv_per_repeat_customer
+        rows.append({
+            "Scenario": f"Convert {int(r * 100)}% of one-time → repeat",
+            "Converted customers": converted,
+            "Avg GMV per repeat customer (assumption)": avg_gmv_per_repeat_customer,
+            "Estimated GMV uplift": uplift_gmv
+        })
+
+    return pd.DataFrame(rows)
+
+
+def vendor_loss_scenarios(vc: dict, top_list=(1, 3, 5, 10)) -> pd.DataFrame:
+    """
+    Estimate GMV at risk if top-N vendors are lost.
+
+    Assumption:
+    Losing the vendor implies losing their GMV contribution (no immediate substitution).
+    This is a directional risk estimate, not a precise forecast.
+    """
+    if not vc or "vendor_table" not in vc:
+        return pd.DataFrame()
+
+    vtable = vc["vendor_table"].copy()
+    if vtable.empty or "GMV" not in vtable.columns:
+        return pd.DataFrame()
+
+    total_gmv = float(vtable["GMV"].sum())
+    if total_gmv <= 0:
+        return pd.DataFrame()
+
+    rows = []
+    for n in top_list:
+        at_risk = float(vtable.head(n)["GMV"].sum())
+        rows.append({
+            "Scenario": f"Lose Top {n} vendor(s)",
+            "GMV at risk": at_risk,
+            "GMV at risk (%)": at_risk / total_gmv
+        })
+
+    return pd.DataFrame(rows)
+
+
 def fmt_int(x):
     if pd.isna(x):
         return "-"
@@ -288,7 +357,7 @@ def fmt_money(x):
 def fmt_pct(x):
     if pd.isna(x):
         return "-"
-    return f"{x*100:.2f}%"
+    return f"{x * 100:.2f}%"
 
 
 def safe_csv_download(df: pd.DataFrame, filename: str, label: str):
@@ -307,13 +376,13 @@ def safe_csv_download(df: pd.DataFrame, filename: str, label: str):
 # Sidebar: Inputs
 # -----------------------------
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header(" Settings")
 
-    st.subheader("📁 Data Source")
+    st.subheader(" Data Source")
     uploaded_file = st.file_uploader("Upload Data.xlsx", type=["xlsx"])
 
     st.markdown("---")
-    st.subheader("🧹 Data Cleaning")
+    st.subheader(" Data Cleaning")
     drop_full_duplicates = st.checkbox("Drop fully duplicated rows", value=True)
     drop_gmv_le_zero = st.checkbox("Drop rows with GMV ≤ 0", value=True)
 
@@ -338,7 +407,7 @@ df_base = clean_data(
 # Sidebar: Order definition + Filters (based on cleaned/base dataset)
 with st.sidebar:
     st.markdown("---")
-    st.subheader("🧾 Order Definition")
+    st.subheader(" Order Definition")
 
     order_def = st.radio(
         "How should we count orders?",
@@ -348,7 +417,7 @@ with st.sidebar:
     use_unique_orderkey = (order_def == "Unique OrderKey (deduplicate by OrderKey)")
 
     st.markdown("---")
-    st.subheader("🎛️ Filters")
+    st.subheader(" Filters")
 
     if "OrderDate" in df_base.columns and df_base["OrderDate"].notna().any():
         min_date = df_base["OrderDate"].min().date()
@@ -388,7 +457,7 @@ tab1, tab2, tab3 = st.tabs(["1) Data Overview & Validation", "2) KPI Dashboard",
 # Tab 1: Overview & Validation
 # -----------------------------
 with tab1:
-    st.subheader("🧾 Data Overview")
+    st.subheader(" Data Overview")
 
     rep_raw = data_quality_report(df_raw)
     rep_clean = data_quality_report(df_base)
@@ -411,7 +480,7 @@ with tab1:
             st.metric("Date range (raw)", "-")
 
     st.markdown("---")
-    st.subheader("🔎 Schema & Missing Values")
+    st.subheader(" Schema & Missing Values")
 
     schema_df = pd.DataFrame({
         "Column": df_raw.columns,
@@ -422,7 +491,7 @@ with tab1:
     st.dataframe(schema_df, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("⚠️ Data Issues (recommended to mention)")
+    st.subheader(" Data Issues (recommended to mention)")
 
     issues = []
     if rep_raw["orderkey_duplicate_row_count"] and rep_raw["orderkey_duplicate_row_count"] > 0:
@@ -447,7 +516,7 @@ with tab1:
         st.success("No major issues detected.")
 
     st.markdown("---")
-    st.subheader("📥 Exports")
+    st.subheader(" Exports")
 
     colE1, colE2, colE3 = st.columns(3)
     with colE1:
@@ -466,7 +535,7 @@ with tab1:
 # Tab 2: KPI Dashboard
 # -----------------------------
 with tab2:
-    st.subheader("📌 KPI Dashboard")
+    st.subheader(" KPI Dashboard")
 
     k = compute_kpis(df, use_unique_orderkey)
 
@@ -527,11 +596,10 @@ with tab2:
             st.altair_chart(gmv_chart, use_container_width=True)
 
         st.caption("If the last month is partial, it may show a drop compared to full months.")
-
         safe_csv_download(tr, "monthly_trends.csv", "Download monthly trends (CSV)")
 
     st.markdown("---")
-    st.subheader("🏆 Breakdowns")
+    st.subheader(" Breakdowns")
 
     left, right = st.columns(2)
 
@@ -555,7 +623,6 @@ with tab2:
                 .properties(height=360)
             )
             st.altair_chart(chart_v, use_container_width=True)
-
             safe_csv_download(tv, "top10_vendors_by_gmv.csv", "Download Top 10 Vendors (CSV)")
 
     with right:
@@ -577,7 +644,6 @@ with tab2:
                 .properties(height=360)
             )
             st.altair_chart(chart_c, use_container_width=True)
-
             safe_csv_download(tc, "top10_categories_by_gmv.csv", "Download Top 10 Categories (CSV)")
 
 
@@ -585,7 +651,7 @@ with tab2:
 # Tab 3: Analysis & Insights
 # -----------------------------
 with tab3:
-    st.subheader("🧠 Analysis & Insights")
+    st.subheader(" Analysis & Insights")
 
     st.markdown("## Task A — Customer Behavior")
     cb = customer_behavior(df, use_unique_orderkey)
@@ -628,8 +694,25 @@ with tab3:
             .properties(height=300)
         )
         st.altair_chart(dist_chart, use_container_width=True)
-
         safe_csv_download(dist, "orders_per_customer_distribution.csv", "Download orders/customer distribution (CSV)")
+
+        # -----------------------------
+        # Impact Scenario: Retention Upside
+        # -----------------------------
+        st.markdown("---")
+        st.markdown("###  Retention Upside (Impact Scenarios)")
+        st.caption("Directional estimates under a simplifying assumption (not a precise forecast).")
+
+        ret_df = retention_uplift_scenarios(cb, conversion_rates=(0.02, 0.05, 0.10))
+        if ret_df.empty:
+            st.info("Not enough data to estimate retention uplift scenarios.")
+        else:
+            # display-friendly copy
+            ret_disp = ret_df.copy()
+            ret_disp["Avg GMV per repeat customer (assumption)"] = ret_disp["Avg GMV per repeat customer (assumption)"].map(lambda x: f"{x:,.2f}")
+            ret_disp["Estimated GMV uplift"] = ret_disp["Estimated GMV uplift"].map(lambda x: f"{x:,.2f}")
+            st.dataframe(ret_disp, use_container_width=True)
+            safe_csv_download(ret_df, "retention_uplift_scenarios.csv", "Download retention uplift scenarios (CSV)")
 
     st.markdown("---")
     st.markdown("## Task B — Vendor Contribution")
@@ -665,8 +748,25 @@ with tab3:
 
         safe_csv_download(vtable, "vendor_contribution_table.csv", "Download vendor contribution table (CSV)")
 
+        # -----------------------------
+        # Impact Scenario: Vendor Dependency Risk
+        # -----------------------------
+        st.markdown("---")
+        st.markdown("###  Vendor Dependency Risk (Impact Scenarios)")
+        st.caption("Directional estimates under a simplifying assumption (not a precise forecast).")
+
+        risk_df = vendor_loss_scenarios(vc, top_list=(1, 3, 5, 10))
+        if risk_df.empty:
+            st.info("Not enough data to estimate vendor dependency scenarios.")
+        else:
+            risk_disp = risk_df.copy()
+            risk_disp["GMV at risk"] = risk_disp["GMV at risk"].map(lambda x: f"{x:,.2f}")
+            risk_disp["GMV at risk (%)"] = risk_df["GMV at risk (%)"].map(lambda x: f"{x * 100:.2f}%")
+            st.dataframe(risk_disp, use_container_width=True)
+            safe_csv_download(risk_df, "vendor_dependency_risk_scenarios.csv", "Download vendor dependency scenarios (CSV)")
+
     st.markdown("---")
-    st.markdown("## 📌 Business Insights (4–6)")
+    st.markdown("##  Business Insights (4–6)")
 
     rep_raw = data_quality_report(df_raw)
 
