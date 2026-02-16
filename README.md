@@ -108,6 +108,7 @@ All visualizations and KPIs update dynamically based on filter selection.
 - Repeat customer percentage
 - GMV share from repeat customers
 - Orders per customer distribution (binned)
+- Retention upside scenarios (directional impact estimates)
 
 ### Task B — Vendor Contribution
 
@@ -117,6 +118,7 @@ All visualizations and KPIs update dynamically based on filter selection.
 - Top 10 GMV share
 - Top 20% vendor GMV share
 - Cumulative GMV curve (Pareto analysis)
+- Vendor dependency risk scenarios (directional impact estimates)
 
 ---
 
@@ -130,6 +132,33 @@ The application includes 4–6 analytical insights covering:
 - Vendor revenue concentration risk
 - Long-tail vendor contribution
 - Recommendation for building an analytics-ready data mart
+
+---
+
+## Assumptions & Limitations
+
+- **OrderKey duplicates → Order definition toggle:**  
+  Although the instructions state each row represents one order, duplicate `OrderKey` values were detected.  
+  To keep the analysis transparent, the dashboard supports two order definitions (Row-level vs Unique `OrderKey`).
+
+- **GMV ≤ 0 may reflect refunds/cancellations:**  
+  Records with `GMV ≤ 0` may represent refunds, cancellations, or data-entry issues.  
+  A cleaning toggle is provided to optionally exclude these records depending on reporting needs.
+
+- **Impact scenarios are directional (assumption-driven):**  
+  Retention and vendor-risk scenarios are simplified, directional estimates designed to quantify upside/risk under assumptions,  
+  not precise forecasts.
+
+---
+
+## Summary (Why this aligns with the test goal)
+
+This project focuses on analytical thinking and insight generation (not just charting), including:
+
+- Data quality and integrity checks before KPI calculation
+- Detecting potential grain ambiguity and making metric definitions explicit
+- Translating metrics into business insights (retention opportunity, vendor concentration risk)
+- Quantifying upside/risk with simple scenario modeling
 
 ---
 
