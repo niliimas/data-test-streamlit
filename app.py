@@ -773,14 +773,23 @@ with tab3:
     rep_raw = data_quality_report(df_raw)
 
     # Helper computations for insights
-    # Category dominance (Top 2 share)
+    # Category dominance (Top 2 share + IDs)
     top2_cat_share = np.nan
+    top2_cat_ids = []
+    
     if "GMV" in df.columns and df["GMV"].notna().any() and "CategoryID" in df.columns:
         total_gmv_current = float(df["GMV"].sum())
         if total_gmv_current > 0:
-            cat_tbl = top_n(df, "CategoryID", "GMV", n=2)
+            cat_tbl = (
+                df.groupby("CategoryID", as_index=False)["GMV"]
+                .sum()
+                .sort_values("GMV", ascending=False)
+                .head(2)
+            )
             if not cat_tbl.empty:
                 top2_cat_share = float(cat_tbl["GMV"].sum() / total_gmv_current)
+                top2_cat_ids = cat_tbl["CategoryID"].astype(str).tolist()
+
 
     # Campaign-driven pattern (peak GMV month)
     peak_month = None
@@ -872,20 +881,18 @@ with tab3:
     # 7) Category Dominance
     if pd.notna(top2_cat_share) and len(top2_cat_ids) == 2:
         insights.append(
-            f"7) Category Dominance (Product Mix Concentration): "
-            f"CategoryID {top2_cat_ids[0]} (~{fmt_money(top2_cat_gmvs[0])}) and "
-            f"{top2_cat_ids[1]} (~{fmt_money(top2_cat_gmvs[1])}) together account for "
-            f"{fmt_pct(top2_cat_share)} of total GMV. "
-            "This indicates that revenue performance is heavily dependent on a small number of categories. "
-            "If demand in these categories slows down or supply is disrupted, overall GMV would be materially affected. "
-            "Strategically, this creates both a focus opportunity (optimize and double down on winning categories) "
-            "and a diversification need (expand adjacent categories to reduce concentration risk)."
+            f"7) Category Dominance (product concentration): Categories {top2_cat_ids[0]} and {top2_cat_ids[1]} "
+            f"together account for {fmt_pct(top2_cat_share)} of GMV. "
+            "This indicates meaningful product mix concentration. "
+            "If demand or supply in these categories shifts, overall revenue performance could be materially impacted. "
+            "Recommendation: evaluate diversification and category-level growth experiments."
         )
     else:
         insights.append(
-            "7) Category Dominance: GMV appears concentrated in a small set of categories. "
-            "Quantifying top category shares can guide diversification decisions."
+            "7) Category Dominance: GMV appears concentrated in a small number of categories. "
+            "Quantifying top category shares can guide diversification strategy."
         )
+
             
     
     # 8) Campaign-driven month spike
